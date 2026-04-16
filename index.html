@@ -57,7 +57,8 @@ canvas{display:block;}
 .wave-info{color:var(--green);}
 #topBar .btn-back{padding:6px 16px;font-size:0.8rem;border-radius:8px;}
 
-#hotbar{position:absolute;bottom:0;left:0;width:100%;display:flex;align-items:end;justify-content:center;padding:8px 12px 12px;gap:8px;background:linear-gradient(0deg,rgba(0,0,0,0.85) 0%,transparent 100%);}
+#hotbar{position:absolute;bottom:0;left:0;width:100%;display:flex;align-items:end;justify-content:center;padding:8px 12px 12px;gap:6px;background:linear-gradient(0deg,rgba(0,0,0,0.85) 0%,transparent 100%);overflow-x:auto;box-sizing:border-box;}
+.unit-slot{min-width:54px;}
 .unit-slot{display:flex;flex-direction:column;align-items:center;cursor:pointer;transition:all 0.2s;padding:6px;border-radius:10px;border:2px solid transparent;min-width:60px;}
 .unit-slot:hover{border-color:var(--gold);background:rgba(245,200,66,0.1);cursor:grab;}
 .unit-slot:active{cursor:grabbing;}
