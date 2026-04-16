@@ -181,6 +181,7 @@ let wave = 0;
 let maxWaves = 10;
 let enemies = [];
 let towers = [];
+let turrets = [];
 let projectiles = [];
 let particles = [];
 let selectedTowerType = null;
@@ -310,6 +311,13 @@ const TOWER_DEFS = [
     desc:'Slows enemies', slow:0.5,
     upgradeCost:[140,200,280,380],
     dmgUp:[1,2,3,4], rangeUp:[10,12,15,20], rateUp:[0.02,0.03,0.04,0.05]
+  },
+  {
+    id:'engineer', name:'Engineer', cost:175, color:'#f39c12',
+    dmg:6, range:90, fireRate:1.5, projSpeed:300, projColor:'#f39c12',
+    desc:'Spawns turrets every 10s', turretInterval:10,
+    upgradeCost:[120,180,250,340],
+    dmgUp:[2,3,4,5], rangeUp:[8,10,12,15], rateUp:[0.05,0.07,0.09,0.11]
   }
 ];
 
@@ -971,7 +979,7 @@ function drawCrown(headY, headR, s, lw) {
 
 const weaponMap = {
   scout:'pistol', hunter:'bow', soldier:'rifle',
-  minigunner:'minigun', sniper:'sniper', rocket:'rpg', freezer:'freeze'
+  minigunner:'minigun', sniper:'sniper', rocket:'rpg', freezer:'freeze', engineer:'pistol'
 };
 
 function drawPath(level) {
@@ -1186,7 +1194,8 @@ function onDragEnd(e) {
         fireCooldown: 0, angle: 0,
         color: def.color, projSpeed: def.projSpeed, projColor: def.projColor,
         splash: def.splash || 0, slow: def.slow || 0,
-        kills: 0
+        kills: 0,
+        turretTimer: def.turretInterval || 0
       });
       updateCoinsUI();
       
@@ -1286,7 +1295,7 @@ function buildHotbar() {
 }
 
 function getUnitEmoji(id) {
-  const map = {scout:'🏃', hunter:'🏹', soldier:'🔫', minigunner:'⚡', sniper:'🎯', rocket:'🚀', freezer:'❄️'};
+  const map = {scout:'🏃', hunter:'🏹', soldier:'🔫', minigunner:'⚡', sniper:'🎯', rocket:'🚀', freezer:'❄️', engineer:'🔧'};
   return map[id] || '👤';
 }
 
@@ -1496,6 +1505,64 @@ function updateGame(dt) {
     }
   }
   
+  // Engineer: spawn turrets
+  for(let t of towers) {
+    if(t.type !== 'engineer') continue;
+    t.turretTimer -= dt;
+    if(t.turretTimer <= 0) {
+      t.turretTimer = 10;
+      let spawned = false;
+      for(let attempt = 0; attempt < 8 && !spawned; attempt++) {
+        const ang = (attempt / 8) * Math.PI * 2;
+        const dist = 38 + Math.random() * 15;
+        const tx = t.x + Math.cos(ang) * dist;
+        const ty = t.y + Math.sin(ang) * dist;
+        if(canPlace(tx, ty, path)) {
+          turrets.push({
+            x: tx, y: ty,
+            life: 20, maxLife: 20,
+            fireCooldown: 0, angle: 0,
+            range: 110,
+            dmg: 8 + (t.level - 1) * 2,
+            fireRate: 1.2,
+            projSpeed: 350
+          });
+          spawned = true;
+        }
+      }
+    }
+  }
+
+  // Update turrets
+  for(let i = turrets.length - 1; i >= 0; i--) {
+    const t = turrets[i];
+    t.life -= dt;
+    if(t.life <= 0) { turrets.splice(i, 1); continue; }
+    t.fireCooldown -= dt;
+
+    let target = null, bestDist = -1;
+    for(let e of enemies) {
+      const dx = e.x - t.x, dy = e.y - t.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if(d <= t.range && e.dist > bestDist) { target = e; bestDist = e.dist; }
+    }
+    if(target) {
+      t.angle = Math.atan2(target.y - t.y, target.x - t.x);
+      if(t.fireCooldown <= 0) {
+        t.fireCooldown = t.fireRate;
+        projectiles.push({
+          x: t.x + Math.cos(t.angle)*12,
+          y: t.y + Math.sin(t.angle)*12,
+          vx: Math.cos(t.angle) * t.projSpeed,
+          vy: Math.sin(t.angle) * t.projSpeed,
+          dmg: t.dmg, color: '#ffd700',
+          splash: 0, slow: 0,
+          owner: t, life: 3, radius: 3
+        });
+      }
+    }
+  }
+
   // Update projectiles
   for(let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
@@ -1711,6 +1778,54 @@ function render() {
     }
   }
   
+  // Draw engineer turrets
+  for(let t of turrets) {
+    const alpha = Math.min(1, t.life / 2);
+    ctx.globalAlpha = alpha;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(t.x, t.y + 7, 10, 4, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // Base box
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.fillStyle = '#7d5a0a';
+    ctx.fillRect(-8, -6, 16, 12);
+    ctx.strokeStyle = '#f39c12';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-8, -6, 16, 12);
+    // Center bolt
+    ctx.fillStyle = '#f39c12';
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.5, 0, Math.PI*2);
+    ctx.fill();
+
+    // Rotating barrel
+    ctx.rotate(t.angle);
+    ctx.fillStyle = '#f39c12';
+    ctx.fillRect(2, -2.5, 13, 5);
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(2, -2.5, 13, 5);
+    ctx.restore();
+
+    // Life bar
+    const lbw = 24, lbh = 3;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(t.x - lbw/2 - 1, t.y - 22, lbw + 2, lbh + 2, 2);
+    ctx.fill();
+    ctx.fillStyle = t.life / t.maxLife > 0.4 ? '#f39c12' : '#e74c3c';
+    ctx.beginPath();
+    ctx.roundRect(t.x - lbw/2, t.y - 21, lbw * (t.life / t.maxLife), lbh, 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+  }
+
   // Draw projectiles
   for(let p of projectiles) {
     ctx.fillStyle = p.color;
@@ -1885,6 +2000,7 @@ function startGame(levelIdx, diff) {
   wave = 0;
   enemies = [];
   towers = [];
+  turrets = [];
   projectiles = [];
   particles = [];
   spawnQueue = [];
