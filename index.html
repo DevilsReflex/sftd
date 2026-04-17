@@ -1297,16 +1297,24 @@ document.addEventListener('touchmove', e => { onDragMove(e); }, {passive:false})
 document.addEventListener('touchend', e => { onDragEnd(e); });
 document.addEventListener('touchcancel', e => { onDragEnd(e); });
 
-// Canvas click for tower selection only
-canvas.addEventListener('click', onCanvasClick);
-canvas.addEventListener('touchstart', e => {
-  if(gameState !== 'playing') return;
-  if(dragging) return;
-  // Simulate click for tower selection on touch
-  const t = e.touches[0];
+// Tower selection — must be on #gameUI (not canvas) because gameUI sits on
+// top of the canvas and intercepts all pointer events in the play area.
+const UI_SELECTORS = '#upgradePanel, #hotbar, #topBar, #startWaveBtn, #speedBtn';
+const gameUIEl = document.getElementById('gameUI');
+
+gameUIEl.addEventListener('click', e => {
+  if(gameState !== 'playing' || dragging) return;
+  if(e.target.closest(UI_SELECTORS)) return; // let UI buttons handle themselves
+  onCanvasClick(e);
+});
+
+gameUIEl.addEventListener('touchstart', e => {
+  if(gameState !== 'playing' || dragging) return;
+  if(e.target.closest(UI_SELECTORS)) return;
+  const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
-  const mx = t.clientX - rect.left;
-  const my = t.clientY - rect.top;
+  const mx = touch.clientX - rect.left;
+  const my = touch.clientY - rect.top;
   let clicked = null;
   for(let tw of towers) {
     let dx = tw.x - mx, dy = tw.y - my;
