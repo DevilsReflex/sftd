@@ -1505,29 +1505,27 @@ function updateGame(dt) {
     }
   }
   
-  // Engineer: spawn turrets
+  // Engineer: spawn turrets on either side
   for(let t of towers) {
     if(t.type !== 'engineer') continue;
     t.turretTimer -= dt;
     if(t.turretTimer <= 0) {
       t.turretTimer = 10;
-      let spawned = false;
-      for(let attempt = 0; attempt < 8 && !spawned; attempt++) {
-        const ang = (attempt / 8) * Math.PI * 2;
-        const dist = 38 + Math.random() * 15;
-        const tx = t.x + Math.cos(ang) * dist;
-        const ty = t.y + Math.sin(ang) * dist;
-        if(canPlace(tx, ty, path)) {
-          turrets.push({
-            x: tx, y: ty,
-            life: 20, maxLife: 20,
-            fireCooldown: 0, angle: 0,
-            range: 110,
-            dmg: 8 + (t.level - 1) * 2,
-            fireRate: 1.2,
-            projSpeed: 350
-          });
-          spawned = true;
+      const dist = 42;
+      // Try pairs of opposite directions until both sides are placeable
+      const pairs = [0, Math.PI/4, Math.PI/2, 3*Math.PI/4];
+      for(let baseAng of pairs) {
+        const ax = t.x + Math.cos(baseAng) * dist;
+        const ay = t.y + Math.sin(baseAng) * dist;
+        const bx = t.x + Math.cos(baseAng + Math.PI) * dist;
+        const by = t.y + Math.sin(baseAng + Math.PI) * dist;
+        const aOk = canPlace(ax, ay, path);
+        const bOk = canPlace(bx, by, path);
+        if(aOk || bOk) {
+          const dmg = 8 + (t.level - 1) * 2;
+          if(aOk) turrets.push({ x: ax, y: ay, life: 20, maxLife: 20, fireCooldown: 0, angle: 0, range: 110, dmg, fireRate: 0.6, projSpeed: 350 });
+          if(bOk) turrets.push({ x: bx, y: by, life: 20, maxLife: 20, fireCooldown: 0, angle: 0, range: 110, dmg, fireRate: 0.6, projSpeed: 350 });
+          break;
         }
       }
     }
