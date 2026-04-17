@@ -68,12 +68,19 @@ canvas{display:block;}
 .unit-name{font-size:0.65rem;color:var(--dim);white-space:nowrap;}
 
 /* UPGRADE PANEL */
-#upgradePanel{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:var(--panel);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:16px;width:220px;display:none;z-index:60;}
-#upgradePanel h3{font-family:'Bangers','Comic Sans MS','Comic Sans','Trebuchet MS',cursive,sans-serif;color:var(--gold);font-size:1.3rem;margin-bottom:8px;}
-#upgradePanel .stat-row{display:flex;justify-content:space-between;margin:4px 0;font-size:0.85rem;}
-#upgradePanel .stat-val{color:var(--green);}
-.upgrade-btn{width:100%;margin-top:8px;padding:10px;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-family:'Outfit',sans-serif;font-size:0.9rem;}
-.sell-btn{background:var(--accent);color:#fff;margin-top:4px;}
+#upgradePanel{position:absolute;left:10px;top:50%;transform:translateY(-50%);background:var(--panel);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:16px;width:220px;display:none;z-index:60;}
+#upgradePanel .up-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+#upgradePanel .up-header h3{font-family:'Bangers','Comic Sans MS','Comic Sans','Trebuchet MS',cursive,sans-serif;color:var(--gold);font-size:1.3rem;}
+#upgradePanel .stat-row{display:flex;justify-content:space-between;margin:3px 0;font-size:0.82rem;}
+#upgradePanel .stat-val{color:var(--green);font-weight:700;}
+#upgradePanel .up-section-label{font-size:0.68rem;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin:10px 0 5px;}
+#upgradePanel hr{border:none;border-top:1px solid rgba(255,255,255,0.1);margin:8px 0;}
+.upgrade-btn{width:100%;margin-top:6px;padding:9px 10px;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-family:'Outfit',sans-serif;font-size:0.82rem;text-align:left;transition:opacity 0.15s;}
+.upgrade-btn:disabled{opacity:0.4;cursor:not-allowed;}
+.upg-dmg{background:#c0392b;color:#fff;}
+.upg-range{background:#27ae60;color:#fff;}
+.upg-rate{background:#2980b9;color:#fff;}
+.sell-btn{background:var(--accent);color:#fff;text-align:center;}
 
 /* WAVE ANNOUNCE */
 #waveAnnounce{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-family:'Bangers','Comic Sans MS','Comic Sans','Trebuchet MS',cursive,sans-serif;font-size:3rem;color:var(--gold);text-shadow:3px 3px 0 #000;opacity:0;transition:opacity 0.5s;pointer-events:none;z-index:70;white-space:nowrap;}
@@ -122,14 +129,21 @@ canvas{display:block;}
     <button id="startWaveBtn" class="btn btn-gold" onclick="startNextWave()">▶ START WAVE</button>
     <button id="speedBtn" onclick="toggleSpeed()">1x</button>
     <div id="upgradePanel">
-      <h3 id="upName">Unit</h3>
-      <div class="stat-row"><span>Level</span><span class="stat-val" id="upLvl">1</span></div>
+      <div class="up-header">
+        <span id="upIcon" style="font-size:1.4rem">🔫</span>
+        <h3 id="upName">Unit</h3>
+      </div>
       <div class="stat-row"><span>Damage</span><span class="stat-val" id="upDmg">5</span></div>
       <div class="stat-row"><span>Range</span><span class="stat-val" id="upRng">100</span></div>
       <div class="stat-row"><span>Fire Rate</span><span class="stat-val" id="upSpd">1.0/s</span></div>
-      <button class="upgrade-btn btn-gold" id="upBtn" onclick="upgradeSelected()">Upgrade - $100</button>
-      <button class="upgrade-btn sell-btn" onclick="sellSelected()">Sell - $50</button>
-      <button class="btn btn-back" style="width:100%;margin-top:4px;font-size:0.8rem;" onclick="deselectUnit()">Close</button>
+      <hr>
+      <div class="up-section-label">Type Upgrades · affects all units</div>
+      <button class="upgrade-btn upg-dmg" id="upDmgBtn" onclick="upgradeTypeStat('dmg')">⚔ Damage</button>
+      <button class="upgrade-btn upg-range" id="upRangeBtn" onclick="upgradeTypeStat('range')">📡 Range</button>
+      <button class="upgrade-btn upg-rate" id="upRateBtn" onclick="upgradeTypeStat('rate')">⚡ Fire Rate</button>
+      <hr>
+      <button class="upgrade-btn sell-btn" onclick="sellSelected()">Sell Unit - $0</button>
+      <button class="btn btn-back" style="width:100%;margin-top:6px;font-size:0.8rem;" onclick="deselectUnit()">Close</button>
     </div>
   </div>
 
@@ -169,6 +183,39 @@ if(!CanvasRenderingContext2D.prototype.roundRect) {
     this.lineTo(x, y+tl); this.arcTo(x,y,x+tl,y,tl);
     this.closePath();
   };
+}
+
+// ===== TYPE UPGRADE SYSTEM =====
+// Costs to purchase each successive level of a stat upgrade (per type)
+const STAT_UP_COSTS = [75, 140, 230, 350, 500];
+const MAX_STAT_LEVEL = 5;
+
+// Tracks how many stat upgrades each tower type has purchased
+let typeUpgrades = {};
+
+function initTypeUpgrades() {
+  typeUpgrades = {};
+  TOWER_DEFS.forEach(def => {
+    typeUpgrades[def.id] = { dmg: 0, range: 0, rate: 0 };
+  });
+}
+
+// Returns current stat bonus for a tower based on its type's global upgrades
+function getTypeBonus(defId, stat) {
+  const def = TOWER_DEFS.find(d => d.id === defId);
+  const lvl = typeUpgrades[defId]?.[stat] || 0;
+  if(stat === 'dmg')   return lvl * (def.dmgUp[0] || 3);
+  if(stat === 'range') return lvl * (def.rangeUp[0] || 10);
+  if(stat === 'rate')  return lvl * (def.rateUp[0] || 0.05);
+  return 0;
+}
+
+// Applies the current global type bonuses to a single tower object
+function applyTypeUpgrades(tower) {
+  const def = TOWER_DEFS.find(d => d.id === tower.type);
+  tower.dmg      = def.dmg      + getTypeBonus(tower.type, 'dmg');
+  tower.range    = def.range    + getTypeBonus(tower.type, 'range');
+  tower.fireRate = Math.max(0.05, def.fireRate - getTypeBonus(tower.type, 'rate'));
 }
 
 // ===== GAME STATE =====
@@ -1197,6 +1244,8 @@ function onDragEnd(e) {
         kills: 0,
         turretTimer: def.turretInterval || 0
       });
+      // Apply any global type upgrades already purchased
+      applyTypeUpgrades(towers[towers.length - 1]);
       updateCoinsUI();
       
       // Place particles
@@ -1301,65 +1350,83 @@ function getUnitEmoji(id) {
 
 // ===== UPGRADE PANEL =====
 function showUpgradePanel(tower) {
+  if(!tower) return;
   const panel = document.getElementById('upgradePanel');
   const def = TOWER_DEFS.find(d => d.id === tower.type);
+  const up = typeUpgrades[tower.type] || { dmg: 0, range: 0, rate: 0 };
   panel.style.display = 'block';
-  
-  document.getElementById('upName').textContent = def.name + ' Lv.' + tower.level;
-  document.getElementById('upLvl').textContent = tower.level;
-  document.getElementById('upDmg').textContent = tower.dmg.toFixed(1);
-  document.getElementById('upRng').textContent = Math.floor(tower.range);
-  document.getElementById('upSpd').textContent = (1/tower.fireRate).toFixed(1) + '/s';
-  
-  const btn = document.getElementById('upBtn');
-  if(tower.level >= 5) {
-    btn.textContent = 'MAX LEVEL';
-    btn.disabled = true;
-    btn.style.opacity = '0.5';
-  } else {
-    const cost = def.upgradeCost[tower.level - 1];
-    btn.textContent = `Upgrade - $${cost}`;
-    btn.disabled = false;
-    btn.style.opacity = coins >= cost ? '1' : '0.5';
+
+  document.getElementById('upIcon').textContent = getUnitEmoji(tower.type);
+  document.getElementById('upName').textContent = def.name;
+  document.getElementById('upDmg').textContent  = tower.dmg.toFixed(0);
+  document.getElementById('upRng').textContent  = Math.floor(tower.range);
+  document.getElementById('upSpd').textContent  = (1 / tower.fireRate).toFixed(1) + '/s';
+
+  // Sell value
+  document.querySelector('.sell-btn').textContent = `Sell Unit - $${Math.floor(def.cost * 0.6)}`;
+
+  // Helper: set one stat upgrade button
+  function setBtn(id, stat, label, color) {
+    const btn = document.getElementById(id);
+    const lvl = up[stat];
+    if(lvl >= MAX_STAT_LEVEL) {
+      btn.textContent = `${label} — MAX`;
+      btn.disabled = true;
+    } else {
+      const cost = STAT_UP_COSTS[lvl];
+      const bonus = getTypeBonus(tower.type, stat);
+      const nextBonus = (lvl + 1) * (stat === 'rate'
+        ? (def.rateUp[0] || 0.05)
+        : stat === 'dmg' ? (def.dmgUp[0] || 3) : (def.rangeUp[0] || 10));
+      btn.textContent = `${label}  Lv.${lvl}→${lvl+1}  $${cost}`;
+      btn.disabled = coins < cost;
+    }
   }
+  setBtn('upDmgBtn',   'dmg',   '⚔ Damage',    '#c0392b');
+  setBtn('upRangeBtn', 'range', '📡 Range',     '#27ae60');
+  setBtn('upRateBtn',  'rate',  '⚡ Fire Rate', '#2980b9');
 }
 
-function upgradeSelected() {
+function upgradeTypeStat(stat) {
   if(!selectedPlacedTower) return;
-  const t = selectedPlacedTower;
-  const def = TOWER_DEFS.find(d => d.id === t.type);
-  if(t.level >= 5) return;
-  const cost = def.upgradeCost[t.level - 1];
+  const type = selectedPlacedTower.type;
+  const up = typeUpgrades[type];
+  if(up[stat] >= MAX_STAT_LEVEL) return;
+
+  const cost = STAT_UP_COSTS[up[stat]];
   if(coins < cost) return;
-  
+
   coins -= cost;
-  t.level++;
-  t.dmg += def.dmgUp[t.level - 2];
-  t.range += def.rangeUp[t.level - 2];
-  t.fireRate = Math.max(0.05, t.fireRate - def.rateUp[t.level - 2]);
-  
+  up[stat]++;
+
+  // Apply to ALL existing towers of this type
+  for(const t of towers) {
+    if(t.type === type) applyTypeUpgrades(t);
+  }
+
   updateCoinsUI();
-  showUpgradePanel(t);
-  
-  // Upgrade particle effect
+
+  // Particle burst on selected tower
+  const t = selectedPlacedTower;
+  const color = stat === 'dmg' ? '#e74c3c' : stat === 'range' ? '#4ecca3' : '#3498db';
   for(let i = 0; i < 15; i++) {
     particles.push({
       x: t.x, y: t.y,
-      vx: (Math.random()-0.5)*100,
-      vy: (Math.random()-0.5)*100,
-      life: 0.8, maxLife: 0.8,
-      color: '#f5c842', radius: 3
+      vx: (Math.random()-0.5)*120,
+      vy: (Math.random()-0.5)*120,
+      life: 0.7, maxLife: 0.7,
+      color, radius: 3
     });
   }
+
+  showUpgradePanel(selectedPlacedTower);
 }
 
 function sellSelected() {
   if(!selectedPlacedTower) return;
   const t = selectedPlacedTower;
   const def = TOWER_DEFS.find(d => d.id === t.type);
-  let totalCost = def.cost;
-  for(let i = 0; i < t.level - 1; i++) totalCost += def.upgradeCost[i];
-  coins += Math.floor(totalCost * 0.6);
+  coins += Math.floor(def.cost * 0.6);
   towers = towers.filter(tw => tw !== t);
   deselectUnit();
   updateCoinsUI();
@@ -2001,6 +2068,7 @@ function startGame(levelIdx, diff) {
   turrets = [];
   projectiles = [];
   particles = [];
+  initTypeUpgrades();
   spawnQueue = [];
   waveActive = false;
   selectedTowerType = null;
