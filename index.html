@@ -192,42 +192,28 @@ if(!CanvasRenderingContext2D.prototype.roundRect) {
   };
 }
 
-// ===== TYPE UPGRADE SYSTEM =====
-// Costs to purchase each successive level of a stat upgrade (per type)
+// ===== PER-UNIT UPGRADE SYSTEM =====
 const STAT_UP_COSTS = [75, 140, 230, 350, 500];
 const MAX_STAT_LEVEL = 5;
 const PRESTIGE_COSTS = [600, 1200, 2000];
 const MAX_PRESTIGE_LEVEL = 3;
-const PRESTIGE_UNLOCK_THRESHOLD = 5; // total stat upgrades needed to unlock Evolution
+const PRESTIGE_UNLOCK_THRESHOLD = 5;
 
-// Tracks how many stat upgrades each tower type has purchased
-let typeUpgrades = {};
-
-function initTypeUpgrades() {
-  typeUpgrades = {};
-  TOWER_DEFS.forEach(def => {
-    typeUpgrades[def.id] = { dmg: 0, range: 0, rate: 0, prestige: 0 };
-  });
-}
-
-// Returns current stat bonus for a tower based on its type's global upgrades
-function getTypeBonus(defId, stat) {
-  const def = TOWER_DEFS.find(d => d.id === defId);
-  const lvl = typeUpgrades[defId]?.[stat] || 0;
+function getUpgradeBonus(def, up, stat) {
+  const lvl = up[stat] || 0;
   if(stat === 'dmg')   return lvl * (def.dmgUp[0] || 3);
   if(stat === 'range') return lvl * (def.rangeUp[0] || 10);
   if(stat === 'rate')  return lvl * (def.rateUp[0] || 0.05);
   return 0;
 }
 
-// Applies the current global type bonuses to a single tower object
 function applyTypeUpgrades(tower) {
   const def = TOWER_DEFS.find(d => d.id === tower.type);
-  const prestige = typeUpgrades[tower.type]?.prestige || 0;
-  const pm = 1 + prestige * 0.5; // prestige multiplier: 1x / 1.5x / 2x / 2.5x
-  tower.dmg      = def.dmg      + getTypeBonus(tower.type, 'dmg') * pm;
-  tower.range    = def.range    + getTypeBonus(tower.type, 'range') * pm;
-  tower.fireRate = Math.max(0.05, def.fireRate - getTypeBonus(tower.type, 'rate') * pm);
+  const up = tower.upgrades || { dmg: 0, range: 0, rate: 0, prestige: 0 };
+  const pm = 1 + up.prestige * 0.5;
+  tower.dmg      = def.dmg      + getUpgradeBonus(def, up, 'dmg') * pm;
+  tower.range    = def.range    + getUpgradeBonus(def, up, 'range') * pm;
+  tower.fireRate = Math.max(0.05, def.fireRate - getUpgradeBonus(def, up, 'rate') * pm);
 }
 
 // ===== GAME STATE =====
@@ -2191,10 +2177,9 @@ function onDragEnd(e) {
         color: def.color, projSpeed: def.projSpeed, projColor: def.projColor,
         splash: def.splash || 0, slow: def.slow || 0,
         kills: 0,
-        turretTimer: def.turretInterval || 0
+        turretTimer: def.turretInterval || 0,
+        upgrades: { dmg: 0, range: 0, rate: 0, prestige: 0 }
       });
-      // Apply any global type upgrades already purchased
-      applyTypeUpgrades(towers[towers.length - 1]);
       updateCoinsUI();
       
       // Place particles
@@ -2313,7 +2298,7 @@ function showUpgradePanel(tower) {
   if(!tower) return;
   const panel = document.getElementById('upgradePanel');
   const def = TOWER_DEFS.find(d => d.id === tower.type);
-  const up = typeUpgrades[tower.type] || { dmg: 0, range: 0, rate: 0, prestige: 0 };
+  const up = tower.upgrades || { dmg: 0, range: 0, rate: 0, prestige: 0 };
   panel.style.display = 'block';
 
   document.getElementById('upIcon').textContent = getUnitEmoji(tower.type);
@@ -2371,8 +2356,7 @@ function showUpgradePanel(tower) {
 
 function upgradeTypeStat(stat) {
   if(!selectedPlacedTower) return;
-  const type = selectedPlacedTower.type;
-  const up = typeUpgrades[type];
+  const up = selectedPlacedTower.upgrades;
   if(up[stat] >= MAX_STAT_LEVEL) return;
 
   const cost = STAT_UP_COSTS[up[stat]];
@@ -2381,10 +2365,7 @@ function upgradeTypeStat(stat) {
   coins -= cost;
   up[stat]++;
 
-  // Apply to ALL existing towers of this type
-  for(const t of towers) {
-    if(t.type === type) applyTypeUpgrades(t);
-  }
+  applyTypeUpgrades(selectedPlacedTower);
 
   updateCoinsUI();
 
@@ -2406,8 +2387,7 @@ function upgradeTypeStat(stat) {
 
 function upgradePrestige() {
   if(!selectedPlacedTower) return;
-  const type = selectedPlacedTower.type;
-  const up = typeUpgrades[type];
+  const up = selectedPlacedTower.upgrades;
   if(up.prestige >= MAX_PRESTIGE_LEVEL) return;
 
   const totalStatUps = up.dmg + up.range + up.rate;
@@ -2419,9 +2399,7 @@ function upgradePrestige() {
   coins -= cost;
   up.prestige++;
 
-  for(const t of towers) {
-    if(t.type === type) applyTypeUpgrades(t);
-  }
+  applyTypeUpgrades(selectedPlacedTower);
 
   updateCoinsUI();
 
@@ -2809,7 +2787,7 @@ function render() {
     ctx.ellipse(t.x, t.y + 11, 16, 5, 0, 0, Math.PI*2);
     ctx.fill();
     
-    const tPrestige = typeUpgrades[t.type]?.prestige || 0;
+    const tPrestige = t.upgrades?.prestige || 0;
     drawStickFigure(t.x, t.y, 12, t.color, t.angle, 'tower', weaponMap[t.type], tPrestige);
 
     // Level indicator (above head — head is ~20px above origin for r=12)
@@ -3097,7 +3075,6 @@ function startGame(levelIdx, diff) {
   turrets = [];
   projectiles = [];
   particles = [];
-  initTypeUpgrades();
   spawnQueue = [];
   waveActive = false;
   selectedTowerType = null;
