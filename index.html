@@ -2242,6 +2242,9 @@ function onCanvasClick(e) {
 // Attach global document-level listeners for drag (these work across hotbar→canvas)
 document.addEventListener('mousemove', onDragMove);
 document.addEventListener('mouseup', onDragEnd);
+document.addEventListener('keydown', e => {
+  if(e.key === '[' && gameState === 'playing') { coins += 500; updateCoinsUI(); }
+});
 document.addEventListener('touchmove', e => { onDragMove(e); }, {passive:false});
 document.addEventListener('touchend', e => { onDragEnd(e); });
 document.addEventListener('touchcancel', e => { onDragEnd(e); });
