@@ -81,6 +81,8 @@ canvas{display:block;}
 .upg-range{background:#27ae60;color:#fff;}
 .upg-rate{background:#2980b9;color:#fff;}
 .sell-btn{background:var(--accent);color:#fff;text-align:center;}
+.upg-prestige{background:linear-gradient(135deg,#7a5c00,#c8a820,#7a5c00);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.6);border:1px solid #f5c842;}
+.upg-prestige:not(:disabled):hover{filter:brightness(1.2);}
 
 /* WAVE ANNOUNCE */
 #waveAnnounce{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-family:'Bangers','Comic Sans MS','Comic Sans','Trebuchet MS',cursive,sans-serif;font-size:3rem;color:var(--gold);text-shadow:3px 3px 0 #000;opacity:0;transition:opacity 0.5s;pointer-events:none;z-index:70;white-space:nowrap;}
@@ -141,6 +143,11 @@ canvas{display:block;}
       <button class="upgrade-btn upg-dmg" id="upDmgBtn" onclick="upgradeTypeStat('dmg')">⚔ Damage</button>
       <button class="upgrade-btn upg-range" id="upRangeBtn" onclick="upgradeTypeStat('range')">📡 Range</button>
       <button class="upgrade-btn upg-rate" id="upRateBtn" onclick="upgradeTypeStat('rate')">⚡ Fire Rate</button>
+      <div id="upPrestigeSection" style="display:none">
+        <hr>
+        <div class="up-section-label">Evolution · transforms appearance + boosts all stats</div>
+        <button class="upgrade-btn upg-prestige" id="upPrestigeBtn" onclick="upgradePrestige()">✦ Evolution</button>
+      </div>
       <hr>
       <button class="upgrade-btn sell-btn" onclick="sellSelected()">Sell Unit - $0</button>
       <button class="btn btn-back" style="width:100%;margin-top:6px;font-size:0.8rem;" onclick="deselectUnit()">Close</button>
@@ -189,6 +196,9 @@ if(!CanvasRenderingContext2D.prototype.roundRect) {
 // Costs to purchase each successive level of a stat upgrade (per type)
 const STAT_UP_COSTS = [75, 140, 230, 350, 500];
 const MAX_STAT_LEVEL = 5;
+const PRESTIGE_COSTS = [600, 1200, 2000];
+const MAX_PRESTIGE_LEVEL = 3;
+const PRESTIGE_UNLOCK_THRESHOLD = 5; // total stat upgrades needed to unlock Evolution
 
 // Tracks how many stat upgrades each tower type has purchased
 let typeUpgrades = {};
@@ -196,7 +206,7 @@ let typeUpgrades = {};
 function initTypeUpgrades() {
   typeUpgrades = {};
   TOWER_DEFS.forEach(def => {
-    typeUpgrades[def.id] = { dmg: 0, range: 0, rate: 0 };
+    typeUpgrades[def.id] = { dmg: 0, range: 0, rate: 0, prestige: 0 };
   });
 }
 
@@ -213,9 +223,11 @@ function getTypeBonus(defId, stat) {
 // Applies the current global type bonuses to a single tower object
 function applyTypeUpgrades(tower) {
   const def = TOWER_DEFS.find(d => d.id === tower.type);
-  tower.dmg      = def.dmg      + getTypeBonus(tower.type, 'dmg');
-  tower.range    = def.range    + getTypeBonus(tower.type, 'range');
-  tower.fireRate = Math.max(0.05, def.fireRate - getTypeBonus(tower.type, 'rate'));
+  const prestige = typeUpgrades[tower.type]?.prestige || 0;
+  const pm = 1 + prestige * 0.5; // prestige multiplier: 1x / 1.5x / 2x / 2.5x
+  tower.dmg      = def.dmg      + getTypeBonus(tower.type, 'dmg') * pm;
+  tower.range    = def.range    + getTypeBonus(tower.type, 'range') * pm;
+  tower.fireRate = Math.max(0.05, def.fireRate - getTypeBonus(tower.type, 'rate') * pm);
 }
 
 // ===== GAME STATE =====
@@ -489,13 +501,46 @@ function canPlace(x, y, path) {
 // Thick black outlines, white-filled round head, curved-line eyes,
 // hair tuft, loopy hands, brown shoes, organic curves per unit type.
 
-function drawStickFigure(x, y, r, color, angle, type, weapon) {
+function drawStickFigure(x, y, r, color, angle, type, weapon, tier) {
+  tier = tier || 0;
   ctx.save();
   ctx.translate(x, y);
+  // Prestige units grow slightly larger
+  const rScale = 1 + tier * 0.07;
+  r = r * rScale;
   const s = r / 10;
   const lw = Math.max(2, 2.8 * s); // thick outlines like the reference
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+
+  // Tier 3 outer aura ring
+  if(tier === 3 && weapon) {
+    const auraR = r * 3.2;
+    const pulse = 0.55 + 0.35 * Math.sin((gameTime||0) * 4);
+    ctx.globalAlpha = pulse * 0.22;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, -r * 0.8, auraR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = pulse * 0.55;
+    ctx.beginPath();
+    ctx.arc(0, -r * 0.8, auraR * 0.78, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // Tier 2 energy ring
+  if(tier === 2 && weapon) {
+    const pulse = 0.5 + 0.4 * Math.sin((gameTime||0) * 3);
+    ctx.globalAlpha = pulse * 0.18;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, -r * 0.8, r * 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
 
   // Walking animation phase
   const t = (gameTime || 0) * 3 + x * 0.1;
@@ -636,7 +681,7 @@ function drawStickFigure(x, y, r, color, angle, type, weapon) {
   ctx.stroke();
 
   // === HEADGEAR / ACCESSORIES per unit type ===
-  drawHeadgear(type, weapon, headY, headR, s, lw, color);
+  drawHeadgear(type, weapon, headY, headR, s, lw, color, tier);
 
   // === BOSS CROWN / HEAVY ARMOR MARKS ===
   if(type === 'boss') {
@@ -654,16 +699,52 @@ function drawStickFigure(x, y, r, color, angle, type, weapon) {
     }
   }
 
-  // === COLOR ACCENT (team color band on body) ===
-  if(color && color !== '#222') {
+  // === TIER 2+ CHEST ARMOR PLATE ===
+  if(tier >= 2 && weapon) {
+    const armorColor = tier === 3 ? shadeColor(color, 20) : '#778899';
+    ctx.fillStyle = armorColor;
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = lw * 0.55;
+    ctx.beginPath();
+    ctx.roundRect(-2.8*s, shoulderY + 1*s, 5.6*s, 5*s, 1*s);
+    ctx.fill(); ctx.stroke();
+    // Chest stripe
+    ctx.strokeStyle = tier === 3 ? '#fff' : color;
+    ctx.lineWidth = lw * 0.4;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(0, shoulderY + 1.5*s); ctx.lineTo(0, shoulderY + 5.5*s);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // === TIER 3 GLOWING BOOT OUTLINES ===
+  if(tier === 3 && weapon) {
     ctx.strokeStyle = color;
     ctx.lineWidth = lw * 0.6;
+    ctx.globalAlpha = 0.8;
     ctx.beginPath();
-    ctx.moveTo(-2.5*s, shoulderY + 2*s);
-    ctx.lineTo(2.5*s, shoulderY + 2*s);
+    ctx.ellipse(footLX, hipY+footY+shoeH*0.2, shoeW*0.62, shoeH*0.62, -0.15, 0, Math.PI);
     ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(footRX, hipY+footY+shoeH*0.2, shoeW*0.62, shoeH*0.62, 0.15, 0, Math.PI);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // === COLOR ACCENT (team color band on body) ===
+  if(color && color !== '#222') {
+    if(tier < 2) {
+      // Regular color band
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lw * 0.6;
+      ctx.beginPath();
+      ctx.moveTo(-2.5*s, shoulderY + 2*s);
+      ctx.lineTo(2.5*s, shoulderY + 2*s);
+      ctx.stroke();
+    }
     // Colored shoe tint overlay
-    ctx.globalAlpha = 0.35;
+    ctx.globalAlpha = tier >= 2 ? 0.6 : 0.35;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.ellipse(footLX, hipY+footY+shoeH*0.2, shoeW*0.5, shoeH*0.45, 0, 0, Math.PI);
@@ -875,125 +956,993 @@ function drawWeaponNew(wx, wy, s, lw, weapon, color, angle) {
       }
       break;
     }
+    case 'wrench': {
+      // Engineer wrench / tool gun
+      ctx.fillStyle = '#888';
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = wlw;
+      // Handle
+      ctx.beginPath();
+      ctx.roundRect(-1*s, -1*s, 9*s, 2*s, 0.8*s);
+      ctx.fill(); ctx.stroke();
+      // Wrench head (open end)
+      ctx.fillStyle = '#aaa';
+      ctx.beginPath();
+      ctx.arc(10*s, 0, 2.8*s, 0, Math.PI*2);
+      ctx.fill(); ctx.stroke();
+      // Wrench gap
+      ctx.fillStyle = '#222';
+      ctx.beginPath();
+      ctx.arc(10*s, 0, 1.4*s, 0, Math.PI*2);
+      ctx.fill();
+      // Small gear tooth nubs at top/bottom
+      ctx.fillStyle = '#aaa';
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = wlw * 0.6;
+      ctx.beginPath();
+      ctx.roundRect(8*s, -4*s, 2*s, 1.8*s, 0.4*s);
+      ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      ctx.roundRect(8*s, 2.2*s, 2*s, 1.8*s, 0.4*s);
+      ctx.fill(); ctx.stroke();
+      break;
+    }
   }
   ctx.restore();
 }
 
 // ===== HEADGEAR / ACCESSORIES PER TOWER TYPE =====
-function drawHeadgear(type, weapon, headY, headR, s, lw, color) {
+function drawHeadgear(type, weapon, headY, headR, s, lw, color, tier) {
   if(!weapon) return; // enemies have no headgear (except boss/heavy handled separately)
+  tier = tier || 0;
 
   ctx.strokeStyle = '#222';
   ctx.lineWidth = lw * 0.7;
 
   switch(weapon) {
-    case 'pistol': {
-      // Scout — baseball cap
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(0, headY - headR*0.15, headR*1.05, Math.PI, 2*Math.PI);
-      ctx.fill(); ctx.stroke();
-      // Brim
-      ctx.fillStyle = shadeColor(color, -30);
-      ctx.beginPath();
-      ctx.ellipse(headR*0.5, headY - headR*0.15, headR*0.7, headR*0.2, 0.1, 0, Math.PI*2);
-      ctx.fill(); ctx.stroke();
+    case 'pistol': { // Scout
+      if(tier === 0) {
+        // T0: Baseball cap
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.05, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = shadeColor(color, -30);
+        ctx.beginPath();
+        ctx.ellipse(headR*0.5, headY - headR*0.15, headR*0.7, headR*0.2, 0.1, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+      } else if(tier === 1) {
+        // T1: Cap with gold brim + side visor stripe
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.05, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#f5c842';
+        ctx.beginPath();
+        ctx.ellipse(headR*0.5, headY - headR*0.15, headR*0.75, headR*0.22, 0.1, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Gold accent stripe on cap
+        ctx.strokeStyle = '#f5c842';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.0, Math.PI+0.3, -0.3);
+        ctx.stroke();
+      } else if(tier === 2) {
+        // T2: Tactical combat helmet with ear guards
+        ctx.fillStyle = '#445566';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.18, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Helmet rim
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.22, Math.PI+0.2, -0.2);
+        ctx.stroke();
+        // Left ear guard
+        ctx.fillStyle = '#334';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.55;
+        ctx.beginPath();
+        ctx.ellipse(-headR*1.1, headY - headR*0.1, headR*0.35, headR*0.5, 0.2, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Right ear guard
+        ctx.beginPath();
+        ctx.ellipse(headR*1.1, headY - headR*0.1, headR*0.35, headR*0.5, -0.2, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Visor line
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw * 0.4;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.25, headR*0.9, Math.PI*1.15, -0.15);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else {
+        // T3: Full cyber helmet with glowing visor
+        ctx.fillStyle = '#1a1a2e';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.8;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.25, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Outer rim glow
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw * 0.7;
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.3, Math.PI, 2*Math.PI);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Glowing visor strip
+        const visorGrad = ctx.createLinearGradient(-headR*0.8, 0, headR*0.8, 0);
+        visorGrad.addColorStop(0, 'rgba(0,200,255,0)');
+        visorGrad.addColorStop(0.5, 'rgba(0,200,255,0.9)');
+        visorGrad.addColorStop(1, 'rgba(0,200,255,0)');
+        ctx.fillStyle = visorGrad;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.8, headY - headR*0.55, headR*1.6, headR*0.28, headR*0.1);
+        ctx.fill();
+        // Antenna
+        ctx.strokeStyle = '#00c8ff';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(headR*0.3, headY - headR*1.25);
+        ctx.lineTo(headR*0.5, headY - headR*2.1);
+        ctx.stroke();
+        ctx.fillStyle = '#f5c842';
+        ctx.beginPath();
+        ctx.arc(headR*0.5, headY - headR*2.1, headR*0.18, 0, Math.PI*2);
+        ctx.fill();
+      }
       break;
     }
-    case 'bow': {
-      // Hunter — pointed hood
-      ctx.fillStyle = '#556B2F';
-      ctx.beginPath();
-      ctx.moveTo(-headR*0.9, headY - headR*0.1);
-      ctx.quadraticCurveTo(-headR*0.1, headY - headR*2.2, headR*0.4, headY - headR*0.3);
-      ctx.arc(0, headY, headR*1.0, -0.3, Math.PI+0.1, true);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
+    case 'bow': { // Hunter
+      if(tier === 0) {
+        // T0: Pointed green hood
+        ctx.fillStyle = '#556B2F';
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.9, headY - headR*0.1);
+        ctx.quadraticCurveTo(-headR*0.1, headY - headR*2.2, headR*0.4, headY - headR*0.3);
+        ctx.arc(0, headY, headR*1.0, -0.3, Math.PI+0.1, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      } else if(tier === 1) {
+        // T1: Hood with golden clasp + leaf decoration
+        ctx.fillStyle = '#4a5e28';
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.9, headY - headR*0.1);
+        ctx.quadraticCurveTo(-headR*0.1, headY - headR*2.3, headR*0.4, headY - headR*0.3);
+        ctx.arc(0, headY, headR*1.0, -0.3, Math.PI+0.1, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Golden trim edge
+        ctx.strokeStyle = '#c8a820';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.85, headY - headR*0.1);
+        ctx.quadraticCurveTo(-headR*0.05, headY - headR*2.2, headR*0.35, headY - headR*0.3);
+        ctx.stroke();
+        // Leaf pin
+        ctx.fillStyle = '#7ec850';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.ellipse(headR*0.15, headY - headR*0.65, headR*0.28, headR*0.15, -0.5, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+      } else if(tier === 2) {
+        // T2: War ranger helm with feather plume
+        ctx.fillStyle = '#3d5218';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.12, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Wide brim
+        ctx.fillStyle = '#2e3d12';
+        ctx.beginPath();
+        ctx.ellipse(0, headY - headR*0.2, headR*1.5, headR*0.28, 0, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Feather plume (left side)
+        ctx.strokeStyle = '#c8a820';
+        ctx.lineWidth = lw * 0.5;
+        for(let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-headR*0.3 - i*headR*0.18, headY - headR*1.1);
+          ctx.quadraticCurveTo(-headR*0.9 - i*headR*0.2, headY - headR*2.0, -headR*0.6 - i*headR*0.2, headY - headR*2.4);
+          ctx.stroke();
+        }
+      } else {
+        // T3: Divine ranger crown with wing motif
+        ctx.fillStyle = '#1e3a0a';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.8;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.2, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Gold crown band
+        ctx.fillStyle = '#c8a820';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.55;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.05, headR*1.15, Math.PI+0.1, -0.1);
+        ctx.lineWidth = lw * 1.1;
+        ctx.strokeStyle = '#c8a820';
+        ctx.stroke();
+        // Left wing sweep
+        ctx.strokeStyle = '#7ec850';
+        ctx.lineWidth = lw * 0.6;
+        ctx.globalAlpha = 0.9;
+        for(let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-headR*0.2, headY - headR*1.1);
+          ctx.quadraticCurveTo(-headR*(1.2+i*0.3), headY - headR*(1.4+i*0.2), -headR*(1.0+i*0.4), headY - headR*(2.1+i*0.1));
+          ctx.stroke();
+        }
+        // Right wing sweep
+        for(let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.moveTo(headR*0.2, headY - headR*1.1);
+          ctx.quadraticCurveTo(headR*(1.2+i*0.3), headY - headR*(1.4+i*0.2), headR*(1.0+i*0.4), headY - headR*(2.1+i*0.1));
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        // Center jewel
+        ctx.fillStyle = '#4ecca3';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*1.15, headR*0.22, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+      }
       break;
     }
-    case 'rifle': {
-      // Soldier — military helmet
-      ctx.fillStyle = '#556B2F';
-      ctx.beginPath();
-      ctx.arc(0, headY - headR*0.15, headR*1.15, Math.PI, 2*Math.PI);
-      ctx.fill(); ctx.stroke();
-      // Helmet rim
-      ctx.strokeStyle = '#3d4f2f';
-      ctx.lineWidth = lw * 0.5;
-      ctx.beginPath();
-      ctx.arc(0, headY - headR*0.15, headR*1.2, Math.PI+0.3, -0.3);
-      ctx.stroke();
+    case 'rifle': { // Soldier
+      if(tier === 0) {
+        // T0: Military helmet
+        ctx.fillStyle = '#556B2F';
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.15, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = '#3d4f2f';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.2, Math.PI+0.3, -0.3);
+        ctx.stroke();
+      } else if(tier === 1) {
+        // T1: Helmet + camo stripes
+        ctx.fillStyle = '#556B2F';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.15, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Camo stripe
+        ctx.strokeStyle = '#3d4f2f';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.2, Math.PI+0.3, -0.3);
+        ctx.stroke();
+        // Camo dots
+        ctx.fillStyle = '#3d4f2f';
+        ctx.beginPath(); ctx.arc(-headR*0.3, headY - headR*0.8, headR*0.18, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(headR*0.45, headY - headR*0.55, headR*0.14, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(headR*0.1, headY - headR*1.1, headR*0.12, 0, Math.PI*2); ctx.fill();
+        // Rank stripe
+        ctx.strokeStyle = '#f5c842';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.5, headY - headR*0.05);
+        ctx.lineTo(headR*0.5, headY - headR*0.05);
+        ctx.stroke();
+      } else if(tier === 2) {
+        // T2: Full tactical helmet with face visor
+        ctx.fillStyle = '#334433';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.75;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.2, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Visor half-face (lower half)
+        ctx.fillStyle = 'rgba(60,90,60,0.75)';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.55;
+        ctx.beginPath();
+        ctx.arc(0, headY, headR*1.05, Math.PI+0.15, -0.15);
+        ctx.lineTo(headR*1.0, headY - headR*0.15);
+        ctx.arc(0, headY - headR*0.15, headR*1.05, -0.15, Math.PI+0.15, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Visor tint
+        ctx.fillStyle = 'rgba(100,200,80,0.25)';
+        ctx.beginPath();
+        ctx.arc(0, headY, headR*1.0, Math.PI+0.2, -0.2);
+        ctx.lineTo(headR*0.95, headY - headR*0.15);
+        ctx.arc(0, headY - headR*0.15, headR*1.0, -0.2, Math.PI+0.2, true);
+        ctx.closePath();
+        ctx.fill();
+        // Rank chevrons
+        ctx.strokeStyle = '#f5c842';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.3, headY - headR*1.2); ctx.lineTo(0, headY - headR*1.0); ctx.lineTo(headR*0.3, headY - headR*1.2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.3, headY - headR*1.45); ctx.lineTo(0, headY - headR*1.25); ctx.lineTo(headR*0.3, headY - headR*1.45);
+        ctx.stroke();
+      } else {
+        // T3: Power armor helm with glowing HUD eye
+        ctx.fillStyle = '#1a2a1a';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.85;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.3, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Outer glow rim
+        ctx.strokeStyle = '#4ecca3';
+        ctx.lineWidth = lw * 0.6;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.35, Math.PI, 2*Math.PI);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Full face shield
+        ctx.fillStyle = 'rgba(20,40,20,0.85)';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.6;
+        ctx.beginPath();
+        ctx.arc(0, headY + headR*0.1, headR*1.1, Math.PI+0.05, -0.05);
+        ctx.lineTo(headR*1.05, headY - headR*0.2);
+        ctx.arc(0, headY - headR*0.2, headR*1.1, -0.05, Math.PI+0.05, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // HUD eye glow (single center scan line)
+        ctx.fillStyle = '#4ecca3';
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.75, headY - headR*0.3, headR*1.5, headR*0.22, headR*0.08);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        // Top crest fin
+        ctx.fillStyle = '#2a4a2a';
+        ctx.strokeStyle = '#4ecca3';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.15, headY - headR*1.3);
+        ctx.lineTo(0, headY - headR*2.1);
+        ctx.lineTo(headR*0.15, headY - headR*1.3);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      }
       break;
     }
-    case 'minigun': {
-      // Minigunner — red bandana/headband
-      ctx.fillStyle = '#c0392b';
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = lw * 0.6;
-      ctx.beginPath();
-      ctx.arc(0, headY - headR*0.2, headR*1.02, Math.PI+0.5, -0.5);
-      ctx.lineWidth = lw * 1.2;
-      ctx.stroke();
-      // Bandana tail
-      ctx.fillStyle = '#c0392b';
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = lw * 0.5;
-      ctx.beginPath();
-      ctx.moveTo(-headR*0.85, headY - headR*0.3);
-      ctx.quadraticCurveTo(-headR*1.5, headY + headR*0.2, -headR*1.3, headY + headR*0.5);
-      ctx.lineWidth = lw * 0.9;
-      ctx.stroke();
+    case 'minigun': { // Minigunner
+      if(tier === 0) {
+        // T0: Red bandana
+        ctx.fillStyle = '#c0392b';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.6;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.02, Math.PI+0.5, -0.5);
+        ctx.lineWidth = lw * 1.2;
+        ctx.stroke();
+        ctx.fillStyle = '#c0392b';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.85, headY - headR*0.3);
+        ctx.quadraticCurveTo(-headR*1.5, headY + headR*0.2, -headR*1.3, headY + headR*0.5);
+        ctx.lineWidth = lw * 0.9;
+        ctx.stroke();
+      } else if(tier === 1) {
+        // T1: Bandana + skull print + goggles up on forehead
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 1.3;
+        ctx.strokeStyle = '#a02020';
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.02, Math.PI+0.4, -0.4);
+        ctx.stroke();
+        // Skull dot on bandana
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.35;
+        ctx.beginPath();
+        ctx.arc(-headR*0.1, headY - headR*0.45, headR*0.2, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.arc(-headR*0.2, headY - headR*0.42, headR*0.06, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.arc(-headR*0.0, headY - headR*0.42, headR*0.06, 0, Math.PI*2); ctx.fill();
+        // Tail
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.9;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.85, headY - headR*0.3);
+        ctx.quadraticCurveTo(-headR*1.6, headY + headR*0.3, -headR*1.3, headY + headR*0.6);
+        ctx.stroke();
+        // Goggles pushed up on forehead
+        ctx.fillStyle = '#f5f5dc';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.arc(-headR*0.3, headY - headR*0.82, headR*0.26, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(headR*0.3, headY - headR*0.82, headR*0.26, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        // Goggle bridge
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = lw * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.04, headY - headR*0.82); ctx.lineTo(headR*0.04, headY - headR*0.82);
+        ctx.stroke();
+      } else if(tier === 2) {
+        // T2: Gas mask + goggles
+        ctx.fillStyle = '#333';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY, headR*1.08, Math.PI+0.1, -0.1);
+        ctx.lineTo(headR*1.02, headY - headR*0.2);
+        ctx.arc(0, headY - headR*0.2, headR*1.08, -0.1, Math.PI+0.1, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Filter canister on chin
+        ctx.fillStyle = '#555';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.3, headY + headR*0.45, headR*0.6, headR*0.45, headR*0.12);
+        ctx.fill(); ctx.stroke();
+        // Red goggle lenses
+        ctx.fillStyle = 'rgba(200,30,30,0.55)';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath(); ctx.arc(-headR*0.33, headY - headR*0.25, headR*0.32, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(headR*0.33, headY - headR*0.25, headR*0.32, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        // Red bandana stripe above mask
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = lw * 1.1;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.5, headR*1.03, Math.PI+0.4, -0.4);
+        ctx.stroke();
+      } else {
+        // T3: Full cyber skull mask with glowing eyes
+        ctx.fillStyle = '#111';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.8;
+        ctx.beginPath();
+        ctx.arc(0, headY, headR*1.1, Math.PI+0.05, -0.05);
+        ctx.lineTo(headR*1.05, headY - headR*0.2);
+        ctx.arc(0, headY - headR*0.2, headR*1.1, -0.05, Math.PI+0.05, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Metal panel lines
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = lw * 0.35;
+        ctx.beginPath();
+        ctx.moveTo(0, headY - headR*0.9); ctx.lineTo(0, headY + headR*0.6); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.9, headY - headR*0.1); ctx.lineTo(headR*0.9, headY - headR*0.1); ctx.stroke();
+        // Glowing red eyes
+        const eyePulse = 0.7 + 0.3 * Math.sin((gameTime||0) * 5);
+        ctx.fillStyle = `rgba(255,40,40,${eyePulse})`;
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath(); ctx.arc(-headR*0.32, headY - headR*0.3, headR*0.28, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(headR*0.32, headY - headR*0.3, headR*0.28, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        // Jaw vents
+        ctx.strokeStyle = '#e94560';
+        ctx.lineWidth = lw * 0.3;
+        for(let i = -1; i <= 1; i++) {
+          ctx.beginPath();
+          ctx.moveTo(i*headR*0.3, headY + headR*0.35); ctx.lineTo(i*headR*0.3, headY + headR*0.65); ctx.stroke();
+        }
+        // Top spike
+        ctx.fillStyle = '#c0392b';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.18, headY - headR*1.1);
+        ctx.lineTo(0, headY - headR*2.0);
+        ctx.lineTo(headR*0.18, headY - headR*1.1);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      }
       break;
     }
-    case 'sniper': {
-      // Sniper — beret
-      ctx.fillStyle = '#2c3e50';
-      ctx.beginPath();
-      ctx.arc(0, headY - headR*0.3, headR*0.85, Math.PI, 2*Math.PI);
-      ctx.quadraticCurveTo(headR*1.2, headY - headR*0.3, headR*0.9, headY);
-      ctx.fill(); ctx.stroke();
+    case 'sniper': { // Sniper
+      if(tier === 0) {
+        // T0: Dark beret
+        ctx.fillStyle = '#2c3e50';
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.3, headR*0.85, Math.PI, 2*Math.PI);
+        ctx.quadraticCurveTo(headR*1.2, headY - headR*0.3, headR*0.9, headY);
+        ctx.fill(); ctx.stroke();
+      } else if(tier === 1) {
+        // T1: Beret + gold badge + monocle scope
+        ctx.fillStyle = '#2c3e50';
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.3, headR*0.85, Math.PI, 2*Math.PI);
+        ctx.quadraticCurveTo(headR*1.2, headY - headR*0.3, headR*0.9, headY);
+        ctx.fill(); ctx.stroke();
+        // Gold badge
+        ctx.fillStyle = '#f5c842';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.arc(-headR*0.3, headY - headR*0.55, headR*0.2, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Monocle (small scope around one eye)
+        ctx.strokeStyle = '#aaa';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.arc(headR*0.35, headY - headR*0.05, headR*0.4, 0, Math.PI*2);
+        ctx.stroke();
+        // Scope lens tint
+        ctx.fillStyle = 'rgba(0,100,200,0.3)';
+        ctx.beginPath();
+        ctx.arc(headR*0.35, headY - headR*0.05, headR*0.38, 0, Math.PI*2);
+        ctx.fill();
+      } else if(tier === 2) {
+        // T2: Ghillie hood with scope visor
+        ctx.fillStyle = '#3d4a1f';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(-headR*1.0, headY - headR*0.05);
+        ctx.quadraticCurveTo(-headR*0.2, headY - headR*2.0, headR*0.3, headY - headR*0.2);
+        ctx.arc(0, headY, headR*1.02, -0.35, Math.PI+0.15, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Ghillie texture strips
+        ctx.strokeStyle = '#4a5e28';
+        ctx.lineWidth = lw * 0.35;
+        for(let i = 0; i < 4; i++) {
+          const gx = -headR*0.6 + i*headR*0.35;
+          ctx.beginPath();
+          ctx.moveTo(gx, headY - headR*0.5);
+          ctx.quadraticCurveTo(gx + headR*0.15, headY - headR*1.1, gx + headR*0.05, headY - headR*1.6);
+          ctx.stroke();
+        }
+        // Scope visor band
+        ctx.fillStyle = 'rgba(0,100,200,0.45)';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.65, headY - headR*0.38, headR*1.3, headR*0.3, headR*0.1);
+        ctx.fill(); ctx.stroke();
+      } else {
+        // T3: Shadow master full hood with glowing scope eye
+        ctx.fillStyle = '#0a0a14';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(-headR*1.05, headY - headR*0.05);
+        ctx.quadraticCurveTo(-headR*0.15, headY - headR*2.5, headR*0.35, headY - headR*0.2);
+        ctx.arc(0, headY, headR*1.05, -0.3, Math.PI+0.1, true);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Purple glow trim on hood
+        ctx.strokeStyle = '#9b59b6';
+        ctx.lineWidth = lw * 0.5;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.moveTo(-headR*1.0, headY - headR*0.05);
+        ctx.quadraticCurveTo(-headR*0.1, headY - headR*2.45, headR*0.3, headY - headR*0.2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Single glowing scope eye
+        const sPulse = 0.6 + 0.4 * Math.sin((gameTime||0) * 4);
+        ctx.fillStyle = `rgba(155,89,182,${sPulse})`;
+        ctx.strokeStyle = '#9b59b6';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.ellipse(headR*0.1, headY - headR*0.12, headR*0.52, headR*0.22, 0, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Scope cross-hair
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = lw * 0.25;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(headR*0.1 - headR*0.35, headY - headR*0.12); ctx.lineTo(headR*0.1 + headR*0.35, headY - headR*0.12); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(headR*0.1, headY - headR*0.12 - headR*0.17); ctx.lineTo(headR*0.1, headY - headR*0.12 + headR*0.17); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       break;
     }
-    case 'rpg': {
-      // Rocket — goggles on forehead
-      ctx.fillStyle = '#f39c12';
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = lw * 0.5;
-      // Strap
-      ctx.beginPath();
-      ctx.arc(0, headY - headR*0.1, headR*0.95, Math.PI+0.4, -0.4);
-      ctx.lineWidth = lw * 0.8;
-      ctx.strokeStyle = '#e67e22';
-      ctx.stroke();
-      // Left lens
-      ctx.fillStyle = '#f5f5dc';
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = lw * 0.55;
-      ctx.beginPath();
-      ctx.arc(-headR*0.3, headY - headR*0.45, headR*0.3, 0, Math.PI*2);
-      ctx.fill(); ctx.stroke();
-      // Right lens
-      ctx.beginPath();
-      ctx.arc(headR*0.3, headY - headR*0.45, headR*0.3, 0, Math.PI*2);
-      ctx.fill(); ctx.stroke();
+    case 'rpg': { // Rocket
+      if(tier === 0) {
+        // T0: Goggles on forehead
+        ctx.fillStyle = '#f39c12';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.1, headR*0.95, Math.PI+0.4, -0.4);
+        ctx.lineWidth = lw * 0.8;
+        ctx.strokeStyle = '#e67e22';
+        ctx.stroke();
+        ctx.fillStyle = '#f5f5dc';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.55;
+        ctx.beginPath();
+        ctx.arc(-headR*0.3, headY - headR*0.45, headR*0.3, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(headR*0.3, headY - headR*0.45, headR*0.3, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+      } else if(tier === 1) {
+        // T1: Goggles on forehead + orange helmet base
+        ctx.fillStyle = '#e67e22';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.1, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Goggle strap
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = lw * 0.9;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*0.98, Math.PI+0.35, -0.35);
+        ctx.stroke();
+        // Goggle lenses
+        ctx.fillStyle = '#f5f5dc';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath(); ctx.arc(-headR*0.3, headY - headR*0.48, headR*0.3, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(headR*0.3, headY - headR*0.48, headR*0.3, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      } else if(tier === 2) {
+        // T2: Blast helmet with full visor
+        ctx.fillStyle = '#7a2020';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.75;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.2, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Orange detail stripe
+        ctx.strokeStyle = '#e67e22';
+        ctx.lineWidth = lw * 0.55;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.15, Math.PI+0.25, -0.25);
+        ctx.stroke();
+        // Blast visor
+        ctx.fillStyle = 'rgba(255,100,30,0.45)';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.8, headY - headR*0.5, headR*1.6, headR*0.35, headR*0.1);
+        ctx.fill(); ctx.stroke();
+        // Helmet side bolts
+        ctx.fillStyle = '#aaa';
+        ctx.beginPath(); ctx.arc(-headR*0.95, headY - headR*0.2, headR*0.12, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(headR*0.95, headY - headR*0.2, headR*0.12, 0, Math.PI*2); ctx.fill();
+      } else {
+        // T3: Commander helm with horns + glowing visor
+        ctx.fillStyle = '#4a0a0a';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.85;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.28, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Outer glow
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = lw * 0.6;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.33, Math.PI, 2*Math.PI);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Left horn
+        ctx.fillStyle = '#2a0505';
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(-headR*1.1, headY - headR*0.4);
+        ctx.quadraticCurveTo(-headR*1.6, headY - headR*1.2, -headR*1.1, headY - headR*1.8);
+        ctx.lineTo(-headR*0.9, headY - headR*0.4);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Right horn
+        ctx.fillStyle = '#2a0505';
+        ctx.beginPath();
+        ctx.moveTo(headR*1.1, headY - headR*0.4);
+        ctx.quadraticCurveTo(headR*1.6, headY - headR*1.2, headR*1.1, headY - headR*1.8);
+        ctx.lineTo(headR*0.9, headY - headR*0.4);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Glowing visor
+        const rPulse = 0.7 + 0.3 * Math.sin((gameTime||0) * 4.5);
+        ctx.fillStyle = `rgba(231,76,60,${rPulse * 0.9})`;
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.85, headY - headR*0.55, headR*1.7, headR*0.3, headR*0.1);
+        ctx.fill(); ctx.stroke();
+      }
       break;
     }
-    case 'freeze': {
-      // Freezer — wizard/pointy hat
-      ctx.fillStyle = '#1a5276';
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = lw * 0.7;
-      ctx.beginPath();
-      ctx.moveTo(-headR*0.9, headY - headR*0.15);
-      ctx.lineTo(headR*0.15, headY - headR*2.8);
-      ctx.lineTo(headR*0.85, headY - headR*0.15);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      // Star on hat
-      ctx.fillStyle = '#f5c842';
-      ctx.beginPath();
-      ctx.arc(headR*0.1, headY - headR*1.4, headR*0.2, 0, Math.PI*2);
-      ctx.fill();
+    case 'freeze': { // Freezer
+      if(tier === 0) {
+        // T0: Wizard hat
+        ctx.fillStyle = '#1a5276';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.9, headY - headR*0.15);
+        ctx.lineTo(headR*0.15, headY - headR*2.8);
+        ctx.lineTo(headR*0.85, headY - headR*0.15);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#f5c842';
+        ctx.beginPath();
+        ctx.arc(headR*0.1, headY - headR*1.4, headR*0.2, 0, Math.PI*2);
+        ctx.fill();
+      } else if(tier === 1) {
+        // T1: Wizard hat + ice crystal decorations
+        ctx.fillStyle = '#1a4a70';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.9, headY - headR*0.15);
+        ctx.lineTo(headR*0.15, headY - headR*2.9);
+        ctx.lineTo(headR*0.85, headY - headR*0.15);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Ice blue rim
+        ctx.strokeStyle = '#88eeff';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.88, headY - headR*0.15);
+        ctx.lineTo(headR*0.83, headY - headR*0.15);
+        ctx.stroke();
+        // Snowflake star on hat
+        ctx.strokeStyle = '#88eeff';
+        ctx.lineWidth = lw * 0.4;
+        const sfx = headR*0.1, sfy = headY - headR*1.5;
+        for(let i = 0; i < 6; i++) {
+          const sa = i * Math.PI / 3;
+          ctx.beginPath();
+          ctx.moveTo(sfx, sfy);
+          ctx.lineTo(sfx + Math.cos(sa)*headR*0.28, sfy + Math.sin(sa)*headR*0.28);
+          ctx.stroke();
+        }
+        // Crystal tip
+        ctx.fillStyle = '#00d2ff';
+        ctx.strokeStyle = '#88eeff';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.moveTo(headR*0.15, headY - headR*2.9);
+        ctx.lineTo(headR*0.3, headY - headR*3.3);
+        ctx.lineTo(headR*0.0, headY - headR*3.1);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      } else if(tier === 2) {
+        // T2: Ice crown with multiple spikes
+        ctx.fillStyle = '#0d3d5c';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.1, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Ice spike crown points
+        ctx.fillStyle = '#00d2ff';
+        ctx.strokeStyle = '#88eeff';
+        ctx.lineWidth = lw * 0.45;
+        const spikeAngles = [-0.6, -0.2, 0.2, 0.6, 1.0, Math.PI-1.0, Math.PI-0.6, Math.PI-0.2, Math.PI+0.2, Math.PI+0.6];
+        for(let i = 0; i < 5; i++) {
+          const a = Math.PI + 0.1 + i * (Math.PI - 0.2) / 4;
+          const bx = Math.cos(a) * headR * 1.1;
+          const by = headY - headR*0.2 + Math.sin(a) * headR * 1.1;
+          ctx.beginPath();
+          ctx.moveTo(bx - Math.cos(a+Math.PI/2)*headR*0.18, by - Math.sin(a+Math.PI/2)*headR*0.18);
+          ctx.lineTo(bx + Math.cos(a)*headR*0.7, by + Math.sin(a)*headR*0.7);
+          ctx.lineTo(bx + Math.cos(a+Math.PI/2)*headR*0.18, by + Math.sin(a+Math.PI/2)*headR*0.18);
+          ctx.closePath();
+          ctx.fill(); ctx.stroke();
+        }
+        // Crystal band
+        ctx.strokeStyle = '#00d2ff';
+        ctx.lineWidth = lw * 0.55;
+        ctx.globalAlpha = 0.75;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.1, headR*1.05, Math.PI+0.1, -0.1);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else {
+        // T3: Ethereal ice crown with full aura
+        ctx.fillStyle = '#061d2e';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.8;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.18, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Animated aura glow
+        const aPulse = 0.5 + 0.4 * Math.sin((gameTime||0) * 3.5);
+        ctx.strokeStyle = '#00d2ff';
+        ctx.lineWidth = lw * 0.7;
+        ctx.globalAlpha = aPulse * 0.8;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.25, Math.PI, 2*Math.PI);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Large ice spikes (5)
+        ctx.fillStyle = 'rgba(0,210,255,0.8)';
+        ctx.strokeStyle = '#88eeff';
+        ctx.lineWidth = lw * 0.5;
+        for(let i = 0; i < 5; i++) {
+          const a = Math.PI + 0.15 + i * (Math.PI - 0.3) / 4;
+          const bx = Math.cos(a) * headR * 1.18;
+          const by = headY - headR*0.2 + Math.sin(a) * headR * 1.18;
+          ctx.beginPath();
+          ctx.moveTo(bx - Math.cos(a+Math.PI/2)*headR*0.22, by - Math.sin(a+Math.PI/2)*headR*0.22);
+          ctx.lineTo(bx + Math.cos(a)*headR*1.0, by + Math.sin(a)*headR*1.0);
+          ctx.lineTo(bx + Math.cos(a+Math.PI/2)*headR*0.22, by + Math.sin(a+Math.PI/2)*headR*0.22);
+          ctx.closePath();
+          ctx.fill(); ctx.stroke();
+        }
+        // Glowing forehead gem
+        const gPulse = 0.6 + 0.4 * Math.sin((gameTime||0) * 5);
+        ctx.fillStyle = `rgba(0,210,255,${gPulse})`;
+        ctx.strokeStyle = '#88eeff';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(0, headY - headR*1.3);
+        ctx.lineTo(headR*0.22, headY - headR*1.1);
+        ctx.lineTo(0, headY - headR*0.9);
+        ctx.lineTo(-headR*0.22, headY - headR*1.1);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      }
+      break;
+    }
+    case 'wrench': { // Engineer
+      if(tier === 0) {
+        // T0: Yellow hard hat
+        ctx.fillStyle = '#f39c12';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.1, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Hard hat brim
+        ctx.fillStyle = '#d4870a';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.55;
+        ctx.beginPath();
+        ctx.ellipse(0, headY - headR*0.15, headR*1.35, headR*0.22, 0, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Center ridge
+        ctx.strokeStyle = '#d4870a';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*0.95, Math.PI+0.1, -0.1);
+        ctx.stroke();
+      } else if(tier === 1) {
+        // T1: Hard hat + welding goggles pushed up
+        ctx.fillStyle = '#e67e22';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*1.1, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#c8680e';
+        ctx.beginPath();
+        ctx.ellipse(0, headY - headR*0.15, headR*1.35, headR*0.22, 0, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // Ridge
+        ctx.strokeStyle = '#c8680e';
+        ctx.lineWidth = lw * 0.4;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.15, headR*0.95, Math.PI+0.1, -0.1);
+        ctx.stroke();
+        // Welding goggles pushed up on hat
+        ctx.fillStyle = '#222';
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath(); ctx.arc(-headR*0.3, headY - headR*0.55, headR*0.25, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(headR*0.3, headY - headR*0.55, headR*0.25, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,150,0,0.4)';
+        ctx.beginPath(); ctx.arc(-headR*0.3, headY - headR*0.55, headR*0.23, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(headR*0.3, headY - headR*0.55, headR*0.23, 0, Math.PI*2); ctx.fill();
+        // Goggle bridge
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = lw * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(-headR*0.05, headY - headR*0.55); ctx.lineTo(headR*0.05, headY - headR*0.55);
+        ctx.stroke();
+      } else if(tier === 2) {
+        // T2: Tech helmet with HUD visor and ear modules
+        ctx.fillStyle = '#2a2a3e';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.75;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.2, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Orange accent stripe
+        ctx.strokeStyle = '#f39c12';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.15, Math.PI+0.25, -0.25);
+        ctx.stroke();
+        // Left tech ear module
+        ctx.fillStyle = '#3a3a50';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.roundRect(-headR*1.45, headY - headR*0.6, headR*0.7, headR*0.8, headR*0.15);
+        ctx.fill(); ctx.stroke();
+        // Module light
+        ctx.fillStyle = '#f39c12';
+        ctx.beginPath(); ctx.arc(-headR*1.1, headY - headR*0.25, headR*0.12, 0, Math.PI*2); ctx.fill();
+        // Right tech ear module
+        ctx.fillStyle = '#3a3a50';
+        ctx.strokeStyle = '#222';
+        ctx.beginPath();
+        ctx.roundRect(headR*0.75, headY - headR*0.6, headR*0.7, headR*0.8, headR*0.15);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#f39c12';
+        ctx.beginPath(); ctx.arc(headR*1.1, headY - headR*0.25, headR*0.12, 0, Math.PI*2); ctx.fill();
+        // HUD visor
+        ctx.fillStyle = 'rgba(243,156,18,0.35)';
+        ctx.strokeStyle = '#f39c12';
+        ctx.lineWidth = lw * 0.45;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.75, headY - headR*0.45, headR*1.5, headR*0.28, headR*0.09);
+        ctx.fill(); ctx.stroke();
+      } else {
+        // T3: Mech exo-suit head with displays and antenna array
+        ctx.fillStyle = '#0a0a18';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.85;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.28, Math.PI, 2*Math.PI);
+        ctx.fill(); ctx.stroke();
+        // Orange glow rim
+        ctx.strokeStyle = '#f39c12';
+        ctx.lineWidth = lw * 0.65;
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(0, headY - headR*0.2, headR*1.34, Math.PI, 2*Math.PI);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Heavy side modules
+        ctx.fillStyle = '#1a1a2e';
+        ctx.strokeStyle = '#f39c12';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.roundRect(-headR*1.6, headY - headR*0.65, headR*0.75, headR*0.9, headR*0.15);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();
+        ctx.roundRect(headR*0.85, headY - headR*0.65, headR*0.75, headR*0.9, headR*0.15);
+        ctx.fill(); ctx.stroke();
+        // Module displays
+        const mPulse = 0.6 + 0.4 * Math.sin((gameTime||0) * 3);
+        ctx.fillStyle = `rgba(243,156,18,${mPulse})`;
+        ctx.beginPath(); ctx.roundRect(-headR*1.52, headY - headR*0.55, headR*0.55, headR*0.3, headR*0.08); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(headR*0.97, headY - headR*0.55, headR*0.55, headR*0.3, headR*0.08); ctx.fill();
+        // Visor
+        ctx.fillStyle = `rgba(243,156,18,${mPulse * 0.8})`;
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = lw * 0.5;
+        ctx.beginPath();
+        ctx.roundRect(-headR*0.85, headY - headR*0.5, headR*1.7, headR*0.28, headR*0.1);
+        ctx.fill(); ctx.stroke();
+        // Antenna array (3 antennas)
+        ctx.strokeStyle = '#f39c12';
+        ctx.lineWidth = lw * 0.4;
+        for(let i = -1; i <= 1; i++) {
+          ctx.beginPath();
+          ctx.moveTo(i * headR * 0.4, headY - headR*1.28);
+          ctx.lineTo(i * headR * 0.5, headY - headR*2.1);
+          ctx.stroke();
+          ctx.fillStyle = i === 0 ? '#f5c842' : '#f39c12';
+          ctx.beginPath();
+          ctx.arc(i * headR * 0.5, headY - headR*2.1, headR*0.14, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
       break;
     }
   }
@@ -1026,7 +1975,7 @@ function drawCrown(headY, headR, s, lw) {
 
 const weaponMap = {
   scout:'pistol', hunter:'bow', soldier:'rifle',
-  minigunner:'minigun', sniper:'sniper', rocket:'rpg', freezer:'freeze', engineer:'pistol'
+  minigunner:'minigun', sniper:'sniper', rocket:'rpg', freezer:'freeze', engineer:'wrench'
 };
 
 function drawPath(level) {
@@ -1361,7 +2310,7 @@ function showUpgradePanel(tower) {
   if(!tower) return;
   const panel = document.getElementById('upgradePanel');
   const def = TOWER_DEFS.find(d => d.id === tower.type);
-  const up = typeUpgrades[tower.type] || { dmg: 0, range: 0, rate: 0 };
+  const up = typeUpgrades[tower.type] || { dmg: 0, range: 0, rate: 0, prestige: 0 };
   panel.style.display = 'block';
 
   document.getElementById('upIcon').textContent = getUnitEmoji(tower.type);
@@ -1370,11 +2319,15 @@ function showUpgradePanel(tower) {
   document.getElementById('upRng').textContent  = Math.floor(tower.range);
   document.getElementById('upSpd').textContent  = (1 / tower.fireRate).toFixed(1) + '/s';
 
+  // Prestige tier indicator next to name
+  const tierLabels = ['', ' ◆', ' ◆◆', ' ◆◆◆'];
+  document.getElementById('upName').textContent = def.name + (tierLabels[up.prestige] || '');
+
   // Sell value
   document.querySelector('.sell-btn').textContent = `Sell Unit - $${Math.floor(def.cost * 0.6)}`;
 
   // Helper: set one stat upgrade button
-  function setBtn(id, stat, label, color) {
+  function setBtn(id, stat, label) {
     const btn = document.getElementById(id);
     const lvl = up[stat];
     if(lvl >= MAX_STAT_LEVEL) {
@@ -1382,17 +2335,35 @@ function showUpgradePanel(tower) {
       btn.disabled = true;
     } else {
       const cost = STAT_UP_COSTS[lvl];
-      const bonus = getTypeBonus(tower.type, stat);
-      const nextBonus = (lvl + 1) * (stat === 'rate'
-        ? (def.rateUp[0] || 0.05)
-        : stat === 'dmg' ? (def.dmgUp[0] || 3) : (def.rangeUp[0] || 10));
       btn.textContent = `${label}  Lv.${lvl}→${lvl+1}  $${cost}`;
       btn.disabled = coins < cost;
     }
   }
-  setBtn('upDmgBtn',   'dmg',   '⚔ Damage',    '#c0392b');
-  setBtn('upRangeBtn', 'range', '📡 Range',     '#27ae60');
-  setBtn('upRateBtn',  'rate',  '⚡ Fire Rate', '#2980b9');
+  setBtn('upDmgBtn',   'dmg',   '⚔ Damage');
+  setBtn('upRangeBtn', 'range', '📡 Range');
+  setBtn('upRateBtn',  'rate',  '⚡ Fire Rate');
+
+  // Prestige button
+  const prestigeBtn = document.getElementById('upPrestigeBtn');
+  const prestigeSection = document.getElementById('upPrestigeSection');
+  const totalStatUps = up.dmg + up.range + up.rate;
+  const needed = PRESTIGE_UNLOCK_THRESHOLD - totalStatUps;
+
+  if(up.prestige >= MAX_PRESTIGE_LEVEL) {
+    prestigeSection.style.display = 'block';
+    prestigeBtn.textContent = '✦ Evolution — MAXED';
+    prestigeBtn.disabled = true;
+  } else if(totalStatUps < PRESTIGE_UNLOCK_THRESHOLD) {
+    prestigeSection.style.display = 'block';
+    prestigeBtn.textContent = `✦ Evolution — 🔒 Need ${needed} more upgrade${needed>1?'s':''}`;
+    prestigeBtn.disabled = true;
+  } else {
+    prestigeSection.style.display = 'block';
+    const cost = PRESTIGE_COSTS[up.prestige];
+    const tierName = ['I','II','III'][up.prestige];
+    prestigeBtn.textContent = `✦ Evolution ${tierName}  $${cost}`;
+    prestigeBtn.disabled = coins < cost;
+  }
 }
 
 function upgradeTypeStat(stat) {
@@ -1424,6 +2395,44 @@ function upgradeTypeStat(stat) {
       vy: (Math.random()-0.5)*120,
       life: 0.7, maxLife: 0.7,
       color, radius: 3
+    });
+  }
+
+  showUpgradePanel(selectedPlacedTower);
+}
+
+function upgradePrestige() {
+  if(!selectedPlacedTower) return;
+  const type = selectedPlacedTower.type;
+  const up = typeUpgrades[type];
+  if(up.prestige >= MAX_PRESTIGE_LEVEL) return;
+
+  const totalStatUps = up.dmg + up.range + up.rate;
+  if(totalStatUps < PRESTIGE_UNLOCK_THRESHOLD) return;
+
+  const cost = PRESTIGE_COSTS[up.prestige];
+  if(coins < cost) return;
+
+  coins -= cost;
+  up.prestige++;
+
+  for(const t of towers) {
+    if(t.type === type) applyTypeUpgrades(t);
+  }
+
+  updateCoinsUI();
+
+  // Big gold + color particle burst
+  const t = selectedPlacedTower;
+  const burstColors = ['#f5c842','#ff6b35','#e94560','#4ecca3','#00d2ff'];
+  for(let i = 0; i < 40; i++) {
+    particles.push({
+      x: t.x, y: t.y,
+      vx: (Math.random()-0.5)*220,
+      vy: (Math.random()-0.5)*220,
+      life: 1.4, maxLife: 1.4,
+      color: burstColors[Math.floor(Math.random()*burstColors.length)],
+      radius: 4 + Math.random()*3
     });
   }
 
@@ -1797,14 +2806,23 @@ function render() {
     ctx.ellipse(t.x, t.y + 11, 16, 5, 0, 0, Math.PI*2);
     ctx.fill();
     
-    drawStickFigure(t.x, t.y, 12, t.color, t.angle, 'tower', weaponMap[t.type]);
-    
+    const tPrestige = typeUpgrades[t.type]?.prestige || 0;
+    drawStickFigure(t.x, t.y, 12, t.color, t.angle, 'tower', weaponMap[t.type], tPrestige);
+
     // Level indicator (above head — head is ~20px above origin for r=12)
+    const headOffset = 28 + tPrestige * 2;
+    if(tPrestige > 0) {
+      const prestigeColors = ['', '#c8a820', '#00d2ff', '#e94560'];
+      ctx.fillStyle = prestigeColors[tPrestige];
+      ctx.font = `bold ${10 + tPrestige}px Outfit`;
+      ctx.textAlign = 'center';
+      ctx.fillText('◆'.repeat(tPrestige), t.x, t.y - headOffset - 11);
+    }
     if(t.level > 1) {
       ctx.fillStyle = '#f5c842';
       ctx.font = 'bold 10px Outfit';
       ctx.textAlign = 'center';
-      ctx.fillText('★'.repeat(Math.min(t.level-1, 4)), t.x, t.y - 28);
+      ctx.fillText('★'.repeat(Math.min(t.level-1, 4)), t.x, t.y - headOffset);
     }
     
     ctx.shadowBlur = 0;
